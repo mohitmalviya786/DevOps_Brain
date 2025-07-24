@@ -4,42 +4,34 @@ const genAI = new GoogleGenAI({
   apiKey: process.env.GEMINI_API_KEY || ""
 });
 
-export async function generateTerraformFromDiagram(nodes: any[], edges: any[]): Promise<{
+export async function generateTerraformFromDiagram(nodes: any[], edges: any[], cloudProvider: 'aws' | 'azure' | 'gcp'): Promise<{
   code: string;
   variables: Record<string, any>;
   outputs: Record<string, any>;
 }> {
   try {
-    const prompt = `
-You are an expert DevOps engineer specializing in Terraform and AWS infrastructure. 
-Generate a complete, production-ready Terraform configuration based on the following infrastructure diagram.
-
-Nodes (AWS Resources):
-${JSON.stringify(nodes, null, 2)}
-
-Edges (Connections):
-${JSON.stringify(edges, null, 2)}
-
-Requirements:
-1. Generate valid Terraform code for AWS provider
-2. Include proper resource dependencies based on connections
-3. Use best practices for security, naming, and tagging
-4. Include appropriate variables and outputs
-5. Add comments explaining resource purposes
-6. Follow AWS Well-Architected Framework principles
-
-Please respond with a JSON object containing:
-{
-  "code": "complete terraform configuration as string",
-  "variables": "terraform variables as object",
-  "outputs": "terraform outputs as object"
-}
-`;
+    let providerPrompt = '';
+    let requirements = '';
+    switch (cloudProvider) {
+      case 'aws':
+        providerPrompt = 'You are an expert DevOps engineer specializing in Terraform and AWS infrastructure.';
+        requirements = `1. Generate valid Terraform code for AWS provider\n2. Include proper resource dependencies based on connections\n3. Use best practices for security, naming, and tagging\n4. Include appropriate variables and outputs\n5. Add comments explaining resource purposes\n6. Follow AWS Well-Architected Framework principles`;
+        break;
+      case 'azure':
+        providerPrompt = 'You are an expert DevOps engineer specializing in Terraform and Azure infrastructure.';
+        requirements = `1. Generate valid Terraform code for Azure provider\n2. Include resource dependencies based on connections\n3. Use Azure naming conventions and security best practices\n4. Include variables and outputs\n5. Add comments explaining resource purposes\n6. Follow Azure Well-Architected Framework principles`;
+        break;
+      case 'gcp':
+        providerPrompt = 'You are an expert DevOps engineer specializing in Terraform and GCP infrastructure.';
+        requirements = `1. Generate valid Terraform code for GCP provider\n2. Include resource dependencies based on connections\n3. Use GCP naming conventions and security best practices\n4. Include variables and outputs\n5. Add comments explaining resource purposes\n6. Follow GCP best practices`;
+        break;
+    }
+    const prompt = `\n${providerPrompt}\nGenerate a complete, production-ready Terraform configuration based on the following infrastructure diagram.\n\nNodes (${cloudProvider.toUpperCase()} Resources):\n${JSON.stringify(nodes, null, 2)}\n\nEdges (Connections):\n${JSON.stringify(edges, null, 2)}\n\nRequirements:\n${requirements}\n\nPlease respond with a JSON object containing:\n{\n  "code": "complete terraform configuration as string",\n  "variables": "terraform variables as object",\n  "outputs": "terraform outputs as object"\n}\n`;
 
     const response = await genAI.models.generateContent({
       model: "gemini-2.5-pro",
       config: {
-        systemInstruction: "You are an expert Terraform and AWS infrastructure engineer. Generate production-ready, secure, and well-documented Terraform code.",
+        systemInstruction: providerPrompt,
         responseMimeType: "application/json",
         responseSchema: {
           type: "object",
@@ -55,7 +47,6 @@ Please respond with a JSON object containing:
     });
 
     const result = JSON.parse(response.text || "{}");
-    
     return {
       code: result.code || "",
       variables: result.variables || {},
@@ -206,7 +197,7 @@ Respond with JSON:
   }
 }
 
-export async function optimizeInfrastructure(nodes: any[]): Promise<{
+export async function optimizeInfrastructure(nodes: any[], cloudProvider: 'aws' | 'azure' | 'gcp' = 'aws'): Promise<{
   suggestions: Array<{
     type: 'cost' | 'performance' | 'security' | 'reliability';
     resource: string;
@@ -217,36 +208,28 @@ export async function optimizeInfrastructure(nodes: any[]): Promise<{
   }>;
 }> {
   try {
-    const prompt = `
-Analyze this AWS infrastructure and provide optimization suggestions:
-
-${JSON.stringify(nodes, null, 2)}
-
-Focus on:
-1. Cost optimization opportunities
-2. Performance improvements
-3. Security enhancements
-4. Reliability improvements
-
-Respond with JSON:
-{
-  "suggestions": [
-    {
-      "type": "cost|performance|security|reliability",
-      "resource": "resource name",
-      "current": "current configuration",
-      "suggested": "recommended configuration",
-      "impact": "expected impact description",
-      "savings": optional_cost_savings_in_usd
+    let providerPrompt = '';
+    let focus = '';
+    switch (cloudProvider) {
+      case 'aws':
+        providerPrompt = 'You are an AWS solutions architect expert in infrastructure optimization.';
+        focus = 'Analyze this AWS infrastructure and provide optimization suggestions:';
+        break;
+      case 'azure':
+        providerPrompt = 'You are an Azure solutions architect expert in infrastructure optimization.';
+        focus = 'Analyze this Azure infrastructure and provide optimization suggestions:';
+        break;
+      case 'gcp':
+        providerPrompt = 'You are a GCP solutions architect expert in infrastructure optimization.';
+        focus = 'Analyze this GCP infrastructure and provide optimization suggestions:';
+        break;
     }
-  ]
-}
-`;
+    const prompt = `\n${focus}\n\n${JSON.stringify(nodes, null, 2)}\n\nFocus on:\n1. Cost optimization opportunities\n2. Performance improvements\n3. Security enhancements\n4. Reliability improvements\n\nRespond with JSON:\n{\n  "suggestions": [\n    {\n      "type": "cost|performance|security|reliability",\n      "resource": "resource name",\n      "current": "current configuration",\n      "suggested": "recommended configuration",\n      "impact": "expected impact description",\n      "savings": optional_cost_savings_in_usd\n    }\n  ]\n}\n`;
 
     const response = await genAI.models.generateContent({
       model: "gemini-2.5-pro",
       config: {
-        systemInstruction: "You are an AWS solutions architect expert in infrastructure optimization.",
+        systemInstruction: providerPrompt,
         responseMimeType: "application/json",
         responseSchema: {
           type: "object",
@@ -274,12 +257,328 @@ Respond with JSON:
     });
 
     const result = JSON.parse(response.text || "{}");
-    
     return {
       suggestions: result.suggestions || [],
     };
   } catch (error) {
     console.error("Error optimizing infrastructure:", error);
     throw new Error("Failed to optimize infrastructure with AI");
+  }
+}
+
+export async function detectFrameworkAndServer({ repositoryUrl, codeSample }: { repositoryUrl?: string; codeSample?: string; }): Promise<{
+  framework: string;
+  webServer: string;
+  dockerfile: string;
+  notes: string;
+}> {
+  try {
+    const prompt = `You are an expert DevOps and deployment engineer. Given the following application source code or repository URL, detect the main application framework (Node.js, Python, Java, .NET, Go, PHP, etc.), recommend the best web server (Nginx, Apache, IIS, Caddy), and generate a production-ready Dockerfile. Explain your reasoning in notes.\n\nRepository URL: ${repositoryUrl || 'N/A'}\nCode Sample:\n${codeSample || 'N/A'}\n\nRespond with JSON:\n{\n  "framework": "detected framework name",\n  "webServer": "recommended web server",\n  "dockerfile": "production-ready Dockerfile as string",\n  "notes": "detection and recommendation notes"\n}`;
+
+    const response = await genAI.models.generateContent({
+      model: "gemini-2.5-pro",
+      config: {
+        systemInstruction: "You are an expert DevOps and deployment engineer. Detect frameworks and recommend web server and Dockerfile.",
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: "object",
+          properties: {
+            framework: { type: "string" },
+            webServer: { type: "string" },
+            dockerfile: { type: "string" },
+            notes: { type: "string" }
+          },
+          required: ["framework", "webServer", "dockerfile", "notes"]
+        }
+      },
+      contents: prompt
+    });
+
+    const result = JSON.parse(response.text || "{}");
+    return {
+      framework: result.framework || "",
+      webServer: result.webServer || "",
+      dockerfile: result.dockerfile || "",
+      notes: result.notes || "",
+    };
+  } catch (error) {
+    console.error("Error detecting framework and server:", error);
+    throw new Error("Failed to detect framework and server with AI");
+  }
+}
+
+export async function generateContainerOrchestrationConfig({
+  framework,
+  deploymentType,
+  services,
+  orchestration,
+}: {
+  framework: string;
+  deploymentType: 'vm' | 'container' | 'kubernetes';
+  services: Array<{ name: string; dockerfile: string; ports?: number[] }>;
+  orchestration: 'docker-compose' | 'kubernetes';
+}): Promise<{
+  config: string;
+  notes: string;
+}> {
+  try {
+    const prompt = `You are an expert DevOps and container orchestration engineer. Given the following application details, generate a production-ready ${orchestration === 'docker-compose' ? 'Docker Compose YAML' : 'Kubernetes YAML'} for deployment. Explain your reasoning in notes.\n\nFramework: ${framework}\nDeployment Type: ${deploymentType}\nServices: ${JSON.stringify(services, null, 2)}\n\nRespond with JSON:\n{\n  "config": "${orchestration === 'docker-compose' ? 'docker-compose.yml' : 'kubernetes.yaml'} as string",\n  "notes": "generation notes"\n}`;
+
+    const response = await genAI.models.generateContent({
+      model: "gemini-2.5-pro",
+      config: {
+        systemInstruction: "You are an expert in container orchestration. Generate Docker Compose or Kubernetes YAML.",
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: "object",
+          properties: {
+            config: { type: "string" },
+            notes: { type: "string" }
+          },
+          required: ["config", "notes"]
+        }
+      },
+      contents: prompt
+    });
+
+    const result = JSON.parse(response.text || "{}");
+    return {
+      config: result.config || "",
+      notes: result.notes || "",
+    };
+  } catch (error) {
+    console.error("Error generating container orchestration config:", error);
+    throw new Error("Failed to generate container orchestration config with AI");
+  }
+}
+
+export async function generateCICDIntegration({
+  platform,
+  repositoryUrl,
+}: {
+  platform: 'jenkins' | 'github-actions' | 'gitlab-ci' | 'azure-devops' | 'circleci';
+  repositoryUrl: string;
+}): Promise<{
+  webhookConfig: string;
+  triggerInstructions: string;
+  notes: string;
+}> {
+  try {
+    const prompt = `You are an expert DevOps and CI/CD engineer. Given the following repository URL and CI/CD platform, generate the webhook configuration and pipeline trigger instructions for integrating the repository with the platform. Explain your reasoning in notes.\n\nPlatform: ${platform}\nRepository URL: ${repositoryUrl}\n\nRespond with JSON:\n{\n  "webhookConfig": "webhook configuration as string",\n  "triggerInstructions": "instructions for setting up the webhook and pipeline trigger",\n  "notes": "integration notes"\n}`;
+
+    const response = await genAI.models.generateContent({
+      model: "gemini-2.5-pro",
+      config: {
+        systemInstruction: "You are an expert in CI/CD integration. Generate webhook config and trigger instructions.",
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: "object",
+          properties: {
+            webhookConfig: { type: "string" },
+            triggerInstructions: { type: "string" },
+            notes: { type: "string" }
+          },
+          required: ["webhookConfig", "triggerInstructions", "notes"]
+        }
+      },
+      contents: prompt
+    });
+
+    const result = JSON.parse(response.text || "{}");
+    return {
+      webhookConfig: result.webhookConfig || "",
+      triggerInstructions: result.triggerInstructions || "",
+      notes: result.notes || "",
+    };
+  } catch (error) {
+    console.error("Error generating CI/CD integration:", error);
+    throw new Error("Failed to generate CI/CD integration with AI");
+  }
+}
+
+export async function generateLoggingMonitoringConfig({
+  solution,
+  deploymentType,
+  cloudProvider,
+  services,
+}: {
+  solution: 'elk' | 'efk' | 'loki-grafana' | 'graylog' | 'fluentd' | 'vector' | 'cloudwatch' | 'azure-monitor' | 'google-cloud-logging' | 'datadog' | 'newrelic' | 'splunk' | 'prometheus' | 'apm';
+  deploymentType: 'vm' | 'container' | 'kubernetes' | 'managed';
+  cloudProvider: 'aws' | 'azure' | 'gcp';
+  services: Array<{ name: string; ports?: number[] }>;
+}): Promise<{
+  config: string;
+  notes: string;
+}> {
+  try {
+    const prompt = `You are an expert DevOps and observability engineer. Given the following deployment details, generate a production-ready configuration for the selected logging/monitoring solution (${solution}), tailored for ${deploymentType} on ${cloudProvider.toUpperCase()}. Include integration with the listed services. Explain your reasoning in notes.\n\nSolution: ${solution}\nDeployment Type: ${deploymentType}\nCloud Provider: ${cloudProvider}\nServices: ${JSON.stringify(services, null, 2)}\n\nRespond with JSON:\n{\n  "config": "configuration as string (YAML, JSON, or HCL as appropriate)",\n  "notes": "generation notes"\n}`;
+
+    const response = await genAI.models.generateContent({
+      model: "gemini-2.5-pro",
+      config: {
+        systemInstruction: "You are an expert in logging and monitoring integrations. Generate config for the selected solution.",
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: "object",
+          properties: {
+            config: { type: "string" },
+            notes: { type: "string" }
+          },
+          required: ["config", "notes"]
+        }
+      },
+      contents: prompt
+    });
+
+    const result = JSON.parse(response.text || "{}");
+    return {
+      config: result.config || "",
+      notes: result.notes || "",
+    };
+  } catch (error) {
+    console.error("Error generating logging/monitoring config:", error);
+    throw new Error("Failed to generate logging/monitoring config with AI");
+  }
+}
+
+export async function generateSecurityIntegration({
+  securityFeature,
+  applicationType,
+  cloudProvider,
+}: {
+  securityFeature: 'mfa-totp' | 'mfa-sms' | 'mfa-hardware' | 'sso-saml' | 'sso-oidc' | 'oauth-google' | 'oauth-microsoft' | 'oauth-github' | 'oauth-gitlab' | 'oauth-custom' | 'secrets-management';
+  applicationType: string;
+  cloudProvider: 'aws' | 'azure' | 'gcp';
+}): Promise<{
+  config: string;
+  setupInstructions: string;
+  notes: string;
+}> {
+  try {
+    const prompt = `You are an expert DevSecOps engineer. Given the following application type and cloud provider, generate the configuration and setup instructions for the selected security feature (${securityFeature}). Explain your reasoning in notes.\n\nSecurity Feature: ${securityFeature}\nApplication Type: ${applicationType}\nCloud Provider: ${cloudProvider}\n\nRespond with JSON:\n{\n  "config": "configuration as string (YAML, JSON, or HCL as appropriate)",\n  "setupInstructions": "step-by-step setup instructions",
+  "notes": "integration notes"\n}`;
+
+    const response = await genAI.models.generateContent({
+      model: "gemini-2.5-pro",
+      config: {
+        systemInstruction: "You are an expert in enterprise security integrations. Generate config and setup instructions for the selected feature.",
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: "object",
+          properties: {
+            config: { type: "string" },
+            setupInstructions: { type: "string" },
+            notes: { type: "string" }
+          },
+          required: ["config", "setupInstructions", "notes"]
+        }
+      },
+      contents: prompt
+    });
+
+    const result = JSON.parse(response.text || "{}");
+    return {
+      config: result.config || "",
+      setupInstructions: result.setupInstructions || "",
+      notes: result.notes || "",
+    };
+  } catch (error) {
+    console.error("Error generating security integration:", error);
+    throw new Error("Failed to generate security integration with AI");
+  }
+}
+
+export async function generateWorkflowManagementConfig({
+  workflowFeature,
+  cloudProvider,
+  environments,
+  databases,
+}: {
+  workflowFeature: 'terraform-execution' | 'multi-environment' | 'database-integration' | 'backup-automation';
+  cloudProvider: 'aws' | 'azure' | 'gcp';
+  environments?: Array<'dev' | 'staging' | 'prod'>;
+  databases?: Array<'postgresql' | 'mysql' | 'mongodb' | 'redis'>;
+}): Promise<{
+  config: string;
+  setupInstructions: string;
+  notes: string;
+}> {
+  try {
+    const prompt = `You are an expert DevOps workflow engineer. Given the following requirements, generate the configuration and setup instructions for the selected workflow feature (${workflowFeature}), tailored for ${cloudProvider.toUpperCase()}. Include multi-environment logic, database integration, and backup automation as appropriate. Explain your reasoning in notes.\n\nWorkflow Feature: ${workflowFeature}\nCloud Provider: ${cloudProvider}\nEnvironments: ${environments ? environments.join(', ') : 'N/A'}\nDatabases: ${databases ? databases.join(', ') : 'N/A'}\n\nRespond with JSON:\n{\n  "config": "configuration as string (YAML, JSON, or HCL as appropriate)",\n  "setupInstructions": "step-by-step setup instructions",
+  "notes": "integration notes"\n}`;
+
+    const response = await genAI.models.generateContent({
+      model: "gemini-2.5-pro",
+      config: {
+        systemInstruction: "You are an expert in advanced workflow management. Generate config and setup instructions for the selected feature.",
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: "object",
+          properties: {
+            config: { type: "string" },
+            setupInstructions: { type: "string" },
+            notes: { type: "string" }
+          },
+          required: ["config", "setupInstructions", "notes"]
+        }
+      },
+      contents: prompt
+    });
+
+    const result = JSON.parse(response.text || "{}");
+    return {
+      config: result.config || "",
+      setupInstructions: result.setupInstructions || "",
+      notes: result.notes || "",
+    };
+  } catch (error) {
+    console.error("Error generating workflow management config:", error);
+    throw new Error("Failed to generate workflow management config with AI");
+  }
+}
+
+export async function generateTestAndVerificationPlan({
+  features,
+  integrations,
+}: {
+  features: string[];
+  integrations: string[];
+}): Promise<{
+  testPlan: string;
+  verificationChecklist: string[];
+  notes: string;
+}> {
+  try {
+    const prompt = `You are an expert QA and DevOps engineer. Given the following features and integrations, generate a comprehensive test and verification plan to ensure enterprise readiness. Include both automated and manual test cases, a verification checklist, and any special notes.\n\nFeatures: ${features.join(', ')}\nIntegrations: ${integrations.join(', ')}\n\nRespond with JSON:\n{\n  "testPlan": "detailed test plan as string",
+  "verificationChecklist": ["list of verification items"],
+  "notes": "special notes or caveats"\n}`;
+
+    const response = await genAI.models.generateContent({
+      model: "gemini-2.5-pro",
+      config: {
+        systemInstruction: "You are an expert in QA and verification for enterprise DevOps platforms. Generate a test and verification plan.",
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: "object",
+          properties: {
+            testPlan: { type: "string" },
+            verificationChecklist: { type: "array", items: { type: "string" } },
+            notes: { type: "string" }
+          },
+          required: ["testPlan", "verificationChecklist", "notes"]
+        }
+      },
+      contents: prompt
+    });
+
+    const result = JSON.parse(response.text || "{}");
+    return {
+      testPlan: result.testPlan || "",
+      verificationChecklist: result.verificationChecklist || [],
+      notes: result.notes || "",
+    };
+  } catch (error) {
+    console.error("Error generating test and verification plan:", error);
+    throw new Error("Failed to generate test and verification plan with AI");
   }
 }

@@ -37,6 +37,47 @@ const AWS_PRICING = {
   },
 };
 
+// Azure pricing data (simplified)
+const AZURE_PRICING = {
+  'azurerm_linux_virtual_machine': {
+    'Standard_B1s': { hourly: 0.011, monthly: 8.03 },
+    'Standard_B2s': { hourly: 0.022, monthly: 16.06 },
+    'Standard_D2s_v3': { hourly: 0.096, monthly: 69.12 },
+  },
+  'azurerm_postgresql_server': {
+    'B_Gen5_1': { hourly: 0.034, monthly: 24.82 },
+    'GP_Gen5_2': { hourly: 0.068, monthly: 49.64 },
+  },
+  'azurerm_storage_account': {
+    'standard': { per_gb_monthly: 0.0184 },
+    'cool': { per_gb_monthly: 0.01 },
+  },
+  'azurerm_lb': {
+    'basic': { hourly: 0.025, monthly: 18.25 },
+    'standard': { hourly: 0.03, monthly: 21.90 },
+  },
+};
+
+// GCP pricing data (simplified)
+const GCP_PRICING = {
+  'google_compute_instance': {
+    'e2-micro': { hourly: 0.0076, monthly: 5.47 },
+    'e2-small': { hourly: 0.015, monthly: 10.95 },
+    'n1-standard-1': { hourly: 0.0475, monthly: 34.68 },
+  },
+  'google_sql_database_instance': {
+    'db-f1-micro': { hourly: 0.015, monthly: 10.95 },
+    'db-g1-small': { hourly: 0.027, monthly: 19.71 },
+  },
+  'google_storage_bucket': {
+    'standard': { per_gb_monthly: 0.02 },
+    'nearline': { per_gb_monthly: 0.01 },
+  },
+  'google_compute_forwarding_rule': {
+    'standard': { hourly: 0.025, monthly: 18.25 },
+  },
+};
+
 export interface CostBreakdown {
   resourceType: string;
   resourceName: string;
@@ -55,14 +96,14 @@ export interface CostEstimation {
   lastUpdated: Date;
 }
 
-export async function estimateCosts(diagramData: any): Promise<CostEstimation> {
+export async function estimateCosts(diagramData: any, cloudProvider: 'aws' | 'azure' | 'gcp' = 'aws'): Promise<CostEstimation> {
   const nodes = diagramData.nodes || [];
   const breakdown: CostBreakdown[] = [];
   let totalMonthlyCost = 0;
   let totalHourlyCost = 0;
 
   for (const node of nodes) {
-    const costItem = estimateNodeCost(node);
+    const costItem = estimateNodeCost(node, cloudProvider);
     if (costItem) {
       breakdown.push(costItem);
       totalMonthlyCost += costItem.totalCost;
@@ -79,159 +120,287 @@ export async function estimateCosts(diagramData: any): Promise<CostEstimation> {
   };
 }
 
-function estimateNodeCost(node: any): CostBreakdown | null {
+function estimateNodeCost(node: any, cloudProvider: 'aws' | 'azure' | 'gcp' = 'aws'): CostBreakdown | null {
   const nodeType = node.type;
   const nodeData = node.data || {};
-  
   try {
-    switch (nodeType) {
-      case 'ec2':
-      case 'aws_instance': {
-        const instanceType = nodeData.instanceType || 't3.micro';
-        const quantity = nodeData.quantity || 1;
-        const pricing = AWS_PRICING.aws_instance[instanceType as keyof typeof AWS_PRICING.aws_instance];
-        
-        if (pricing) {
-          return {
-            resourceType: 'EC2 Instance',
-            resourceName: nodeData.name || node.id,
-            instanceType,
-            quantity,
-            unitCost: pricing.monthly,
-            totalCost: pricing.monthly * quantity,
-            period: 'monthly',
-          };
+    switch (cloudProvider) {
+      case 'aws':
+        switch (nodeType) {
+          case 'ec2':
+          case 'aws_instance': {
+            const instanceType = nodeData.instanceType || 't3.micro';
+            const quantity = nodeData.quantity || 1;
+            const pricing = AWS_PRICING.aws_instance[instanceType as keyof typeof AWS_PRICING.aws_instance];
+            if (pricing) {
+              return {
+                resourceType: 'EC2 Instance',
+                resourceName: nodeData.name || node.id,
+                instanceType,
+                quantity,
+                unitCost: pricing.monthly,
+                totalCost: pricing.monthly * quantity,
+                period: 'monthly',
+              };
+            }
+            break;
+          }
+          case 'rds':
+          case 'aws_db_instance': {
+            const instanceType = nodeData.instanceClass || 'db.t3.micro';
+            const quantity = nodeData.quantity || 1;
+            const pricing = AWS_PRICING.aws_db_instance[instanceType as keyof typeof AWS_PRICING.aws_db_instance];
+            if (pricing) {
+              return {
+                resourceType: 'RDS Instance',
+                resourceName: nodeData.name || node.id,
+                instanceType,
+                quantity,
+                unitCost: pricing.monthly,
+                totalCost: pricing.monthly * quantity,
+                period: 'monthly',
+              };
+            }
+            break;
+          }
+          case 's3':
+          case 'aws_s3_bucket': {
+            const storageGB = nodeData.storageGB || 100;
+            const storageClass = nodeData.storageClass || 'standard';
+            const pricing = AWS_PRICING.aws_s3_bucket[storageClass as keyof typeof AWS_PRICING.aws_s3_bucket];
+            if (pricing) {
+              return {
+                resourceType: 'S3 Storage',
+                resourceName: nodeData.name || node.id,
+                instanceType: `${storageGB}GB ${storageClass}`,
+                quantity: storageGB,
+                unitCost: pricing.per_gb_monthly,
+                totalCost: pricing.per_gb_monthly * storageGB,
+                period: 'monthly',
+              };
+            }
+            break;
+          }
+          case 'alb':
+          case 'aws_lb': {
+            const lbType = nodeData.loadBalancerType || 'application';
+            const quantity = nodeData.quantity || 1;
+            const pricing = AWS_PRICING.aws_lb[lbType as keyof typeof AWS_PRICING.aws_lb];
+            if (pricing) {
+              return {
+                resourceType: 'Load Balancer',
+                resourceName: nodeData.name || node.id,
+                instanceType: lbType,
+                quantity,
+                unitCost: pricing.monthly,
+                totalCost: pricing.monthly * quantity,
+                period: 'monthly',
+              };
+            }
+            break;
+          }
+          case 'nat_gateway':
+          case 'aws_nat_gateway': {
+            const quantity = nodeData.quantity || 1;
+            const pricing = AWS_PRICING.aws_nat_gateway.standard;
+            return {
+              resourceType: 'NAT Gateway',
+              resourceName: nodeData.name || node.id,
+              quantity,
+              unitCost: pricing.monthly,
+              totalCost: pricing.monthly * quantity,
+              period: 'monthly',
+            };
+          }
+          case 'vpc_endpoint':
+          case 'aws_vpc_endpoint': {
+            const endpointType = nodeData.endpointType || 'gateway';
+            const quantity = nodeData.quantity || 1;
+            const pricing = AWS_PRICING.aws_vpc_endpoint[endpointType as keyof typeof AWS_PRICING.aws_vpc_endpoint];
+            if (pricing) {
+              return {
+                resourceType: 'VPC Endpoint',
+                resourceName: nodeData.name || node.id,
+                instanceType: endpointType,
+                quantity,
+                unitCost: pricing.monthly,
+                totalCost: pricing.monthly * quantity,
+                period: 'monthly',
+              };
+            }
+            break;
+          }
+          // Free resources
+          case 'vpc':
+          case 'aws_vpc':
+          case 'subnet':
+          case 'aws_subnet':
+          case 'internet_gateway':
+          case 'aws_internet_gateway':
+          case 'route_table':
+          case 'aws_route_table':
+          case 'security_group':
+          case 'aws_security_group': {
+            return {
+              resourceType: getResourceDisplayName(nodeType),
+              resourceName: nodeData.name || node.id,
+              quantity: 1,
+              unitCost: 0,
+              totalCost: 0,
+              period: 'monthly',
+            };
+          }
         }
         break;
-      }
-
-      case 'rds':
-      case 'aws_db_instance': {
-        const instanceType = nodeData.instanceClass || 'db.t3.micro';
-        const quantity = nodeData.quantity || 1;
-        const pricing = AWS_PRICING.aws_db_instance[instanceType as keyof typeof AWS_PRICING.aws_db_instance];
-        
-        if (pricing) {
-          return {
-            resourceType: 'RDS Instance',
-            resourceName: nodeData.name || node.id,
-            instanceType,
-            quantity,
-            unitCost: pricing.monthly,
-            totalCost: pricing.monthly * quantity,
-            period: 'monthly',
-          };
+      case 'azure':
+        switch (nodeType) {
+          case 'azurerm_linux_virtual_machine': {
+            const instanceType = nodeData.instanceType || 'Standard_B1s';
+            const quantity = nodeData.quantity || 1;
+            const pricing = AZURE_PRICING.azurerm_linux_virtual_machine[instanceType as keyof typeof AZURE_PRICING.azurerm_linux_virtual_machine];
+            if (pricing) {
+              return {
+                resourceType: 'Linux VM',
+                resourceName: nodeData.name || node.id,
+                instanceType,
+                quantity,
+                unitCost: pricing.monthly,
+                totalCost: pricing.monthly * quantity,
+                period: 'monthly',
+              };
+            }
+            break;
+          }
+          case 'azurerm_postgresql_server': {
+            const instanceType = nodeData.instanceClass || 'B_Gen5_1';
+            const quantity = nodeData.quantity || 1;
+            const pricing = AZURE_PRICING.azurerm_postgresql_server[instanceType as keyof typeof AZURE_PRICING.azurerm_postgresql_server];
+            if (pricing) {
+              return {
+                resourceType: 'PostgreSQL Server',
+                resourceName: nodeData.name || node.id,
+                instanceType,
+                quantity,
+                unitCost: pricing.monthly,
+                totalCost: pricing.monthly * quantity,
+                period: 'monthly',
+              };
+            }
+            break;
+          }
+          case 'azurerm_storage_account': {
+            const storageGB = nodeData.storageGB || 100;
+            const storageClass = nodeData.storageClass || 'standard';
+            const pricing = AZURE_PRICING.azurerm_storage_account[storageClass as keyof typeof AZURE_PRICING.azurerm_storage_account];
+            if (pricing) {
+              return {
+                resourceType: 'Storage Account',
+                resourceName: nodeData.name || node.id,
+                instanceType: `${storageGB}GB ${storageClass}`,
+                quantity: storageGB,
+                unitCost: pricing.per_gb_monthly,
+                totalCost: pricing.per_gb_monthly * storageGB,
+                period: 'monthly',
+              };
+            }
+            break;
+          }
+          case 'azurerm_lb': {
+            const lbType = nodeData.loadBalancerType || 'basic';
+            const quantity = nodeData.quantity || 1;
+            const pricing = AZURE_PRICING.azurerm_lb[lbType as keyof typeof AZURE_PRICING.azurerm_lb];
+            if (pricing) {
+              return {
+                resourceType: 'Load Balancer',
+                resourceName: nodeData.name || node.id,
+                instanceType: lbType,
+                quantity,
+                unitCost: pricing.monthly,
+                totalCost: pricing.monthly * quantity,
+                period: 'monthly',
+              };
+            }
+            break;
+          }
         }
         break;
-      }
-
-      case 's3':
-      case 'aws_s3_bucket': {
-        const storageGB = nodeData.storageGB || 100; // Default 100GB
-        const storageClass = nodeData.storageClass || 'standard';
-        const pricing = AWS_PRICING.aws_s3_bucket[storageClass as keyof typeof AWS_PRICING.aws_s3_bucket];
-        
-        if (pricing) {
-          return {
-            resourceType: 'S3 Storage',
-            resourceName: nodeData.name || node.id,
-            instanceType: `${storageGB}GB ${storageClass}`,
-            quantity: storageGB,
-            unitCost: pricing.per_gb_monthly,
-            totalCost: pricing.per_gb_monthly * storageGB,
-            period: 'monthly',
-          };
+      case 'gcp':
+        switch (nodeType) {
+          case 'google_compute_instance': {
+            const instanceType = nodeData.instanceType || 'e2-micro';
+            const quantity = nodeData.quantity || 1;
+            const pricing = GCP_PRICING.google_compute_instance[instanceType as keyof typeof GCP_PRICING.google_compute_instance];
+            if (pricing) {
+              return {
+                resourceType: 'Compute Engine',
+                resourceName: nodeData.name || node.id,
+                instanceType,
+                quantity,
+                unitCost: pricing.monthly,
+                totalCost: pricing.monthly * quantity,
+                period: 'monthly',
+              };
+            }
+            break;
+          }
+          case 'google_sql_database_instance': {
+            const instanceType = nodeData.instanceClass || 'db-f1-micro';
+            const quantity = nodeData.quantity || 1;
+            const pricing = GCP_PRICING.google_sql_database_instance[instanceType as keyof typeof GCP_PRICING.google_sql_database_instance];
+            if (pricing) {
+              return {
+                resourceType: 'Cloud SQL',
+                resourceName: nodeData.name || node.id,
+                instanceType,
+                quantity,
+                unitCost: pricing.monthly,
+                totalCost: pricing.monthly * quantity,
+                period: 'monthly',
+              };
+            }
+            break;
+          }
+          case 'google_storage_bucket': {
+            const storageGB = nodeData.storageGB || 100;
+            const storageClass = nodeData.storageClass || 'standard';
+            const pricing = GCP_PRICING.google_storage_bucket[storageClass as keyof typeof GCP_PRICING.google_storage_bucket];
+            if (pricing) {
+              return {
+                resourceType: 'Cloud Storage',
+                resourceName: nodeData.name || node.id,
+                instanceType: `${storageGB}GB ${storageClass}`,
+                quantity: storageGB,
+                unitCost: pricing.per_gb_monthly,
+                totalCost: pricing.per_gb_monthly * storageGB,
+                period: 'monthly',
+              };
+            }
+            break;
+          }
+          case 'google_compute_forwarding_rule': {
+            const lbType = nodeData.loadBalancerType || 'standard';
+            const quantity = nodeData.quantity || 1;
+            const pricing = GCP_PRICING.google_compute_forwarding_rule[lbType as keyof typeof GCP_PRICING.google_compute_forwarding_rule];
+            if (pricing) {
+              return {
+                resourceType: 'Load Balancer',
+                resourceName: nodeData.name || node.id,
+                instanceType: lbType,
+                quantity,
+                unitCost: pricing.monthly,
+                totalCost: pricing.monthly * quantity,
+                period: 'monthly',
+              };
+            }
+            break;
+          }
         }
         break;
-      }
-
-      case 'alb':
-      case 'aws_lb': {
-        const lbType = nodeData.loadBalancerType || 'application';
-        const quantity = nodeData.quantity || 1;
-        const pricing = AWS_PRICING.aws_lb[lbType as keyof typeof AWS_PRICING.aws_lb];
-        
-        if (pricing) {
-          return {
-            resourceType: 'Load Balancer',
-            resourceName: nodeData.name || node.id,
-            instanceType: lbType,
-            quantity,
-            unitCost: pricing.monthly,
-            totalCost: pricing.monthly * quantity,
-            period: 'monthly',
-          };
-        }
-        break;
-      }
-
-      case 'nat_gateway':
-      case 'aws_nat_gateway': {
-        const quantity = nodeData.quantity || 1;
-        const pricing = AWS_PRICING.aws_nat_gateway.standard;
-        
-        return {
-          resourceType: 'NAT Gateway',
-          resourceName: nodeData.name || node.id,
-          quantity,
-          unitCost: pricing.monthly,
-          totalCost: pricing.monthly * quantity,
-          period: 'monthly',
-        };
-      }
-
-      case 'vpc_endpoint':
-      case 'aws_vpc_endpoint': {
-        const endpointType = nodeData.endpointType || 'gateway';
-        const quantity = nodeData.quantity || 1;
-        const pricing = AWS_PRICING.aws_vpc_endpoint[endpointType as keyof typeof AWS_PRICING.aws_vpc_endpoint];
-        
-        if (pricing) {
-          return {
-            resourceType: 'VPC Endpoint',
-            resourceName: nodeData.name || node.id,
-            instanceType: endpointType,
-            quantity,
-            unitCost: pricing.monthly,
-            totalCost: pricing.monthly * quantity,
-            period: 'monthly',
-          };
-        }
-        break;
-      }
-
-      // Free resources
-      case 'vpc':
-      case 'aws_vpc':
-      case 'subnet':
-      case 'aws_subnet':
-      case 'internet_gateway':
-      case 'aws_internet_gateway':
-      case 'route_table':
-      case 'aws_route_table':
-      case 'security_group':
-      case 'aws_security_group': {
-        return {
-          resourceType: getResourceDisplayName(nodeType),
-          resourceName: nodeData.name || node.id,
-          quantity: 1,
-          unitCost: 0,
-          totalCost: 0,
-          period: 'monthly',
-        };
-      }
-
-      default: {
-        // Unknown resource type - try to estimate based on common patterns
-        console.warn(`Unknown resource type for cost estimation: ${nodeType}`);
-        return null;
-      }
     }
   } catch (error) {
     console.error(`Error estimating cost for node ${node.id}:`, error);
     return null;
   }
-
   return null;
 }
 

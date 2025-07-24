@@ -7,7 +7,14 @@ import { estimateCosts } from "./services/costEstimator";
 import { 
   generateCIPipeline, 
   analyzeInfrastructureSecurity, 
-  optimizeInfrastructure 
+  optimizeInfrastructure,
+  detectFrameworkAndServer,
+  generateContainerOrchestrationConfig,
+  generateCICDIntegration,
+  generateLoggingMonitoringConfig,
+  generateSecurityIntegration,
+  generateWorkflowManagementConfig,
+  generateTestAndVerificationPlan
 } from "./services/gemini";
 import { 
   insertProjectSchema,
@@ -164,8 +171,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!diagram) {
         return res.status(404).json({ message: "Diagram not found" });
       }
+      // Fetch the project to get the cloudProvider
+      const project = await storage.getProject(diagram.projectId);
+      if (!project) {
+        return res.status(404).json({ message: "Project not found for diagram" });
+      }
+      const cloudProvider = project.cloudProvider || 'aws';
 
-      const terraformCode = await generateTerraformCode(diagram.diagramData);
+      const terraformCode = await generateTerraformCode(diagram.diagramData, cloudProvider);
       
       const configData = insertTerraformConfigurationSchema.parse({
         diagramId,
@@ -206,8 +219,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!diagram) {
         return res.status(404).json({ message: "Diagram not found" });
       }
+      // Fetch the project to get the cloudProvider
+      const project = await storage.getProject(diagram.projectId);
+      if (!project) {
+        return res.status(404).json({ message: "Project not found for diagram" });
+      }
+      const cloudProvider = project.cloudProvider || 'aws';
 
-      const costEstimation = await estimateCosts(diagram.diagramData);
+      const costEstimation = await estimateCosts(diagram.diagramData, cloudProvider);
       
       const savedEstimation = await storage.saveCostEstimation({
         diagramId,
@@ -305,12 +324,106 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/ai/optimize-infrastructure", isAuthenticated, async (req, res) => {
     try {
-      const { nodes } = req.body;
-      const result = await optimizeInfrastructure(nodes);
+      const { nodes, diagramId } = req.body;
+      let cloudProvider: 'aws' | 'azure' | 'gcp' = 'aws';
+      if (diagramId) {
+        const diagram = await storage.getDiagram(diagramId);
+        if (diagram) {
+          const project = await storage.getProject(diagram.projectId);
+          if (project) {
+            cloudProvider = project.cloudProvider || 'aws';
+          }
+        }
+      }
+      const result = await optimizeInfrastructure(nodes, cloudProvider);
       res.json(result);
     } catch (error) {
       console.error("Error optimizing infrastructure:", error);
       res.status(500).json({ message: "Failed to optimize infrastructure" });
+    }
+  });
+
+  // Universal application framework detection and deployment
+  app.post("/api/applications/detect-framework", isAuthenticated, async (req, res) => {
+    try {
+      const { repositoryUrl, codeSample } = req.body;
+      const result = await detectFrameworkAndServer({ repositoryUrl, codeSample });
+      res.json(result);
+    } catch (error) {
+      console.error("Error detecting framework and server:", error);
+      res.status(500).json({ message: "Failed to detect framework and server" });
+    }
+  });
+
+  // Container orchestration config generation
+  app.post("/api/applications/orchestration-config", isAuthenticated, async (req, res) => {
+    try {
+      const { framework, deploymentType, services, orchestration } = req.body;
+      const result = await generateContainerOrchestrationConfig({ framework, deploymentType, services, orchestration });
+      res.json(result);
+    } catch (error) {
+      console.error("Error generating container orchestration config:", error);
+      res.status(500).json({ message: "Failed to generate container orchestration config" });
+    }
+  });
+
+  // CI/CD integration and webhook management
+  app.post("/api/applications/cicd-integration", isAuthenticated, async (req, res) => {
+    try {
+      const { platform, repositoryUrl } = req.body;
+      const result = await generateCICDIntegration({ platform, repositoryUrl });
+      res.json(result);
+    } catch (error) {
+      console.error("Error generating CI/CD integration:", error);
+      res.status(500).json({ message: "Failed to generate CI/CD integration" });
+    }
+  });
+
+  // Logging/monitoring integration config generation
+  app.post("/api/logging-monitoring/config", isAuthenticated, async (req, res) => {
+    try {
+      const { solution, deploymentType, cloudProvider, services } = req.body;
+      const result = await generateLoggingMonitoringConfig({ solution, deploymentType, cloudProvider, services });
+      res.json(result);
+    } catch (error) {
+      console.error("Error generating logging/monitoring config:", error);
+      res.status(500).json({ message: "Failed to generate logging/monitoring config" });
+    }
+  });
+
+  // Enterprise security integration config generation
+  app.post("/api/security/integration", isAuthenticated, async (req, res) => {
+    try {
+      const { securityFeature, applicationType, cloudProvider } = req.body;
+      const result = await generateSecurityIntegration({ securityFeature, applicationType, cloudProvider });
+      res.json(result);
+    } catch (error) {
+      console.error("Error generating security integration:", error);
+      res.status(500).json({ message: "Failed to generate security integration" });
+    }
+  });
+
+  // Advanced workflow management config generation
+  app.post("/api/workflow-management/config", isAuthenticated, async (req, res) => {
+    try {
+      const { workflowFeature, cloudProvider, environments, databases } = req.body;
+      const result = await generateWorkflowManagementConfig({ workflowFeature, cloudProvider, environments, databases });
+      res.json(result);
+    } catch (error) {
+      console.error("Error generating workflow management config:", error);
+      res.status(500).json({ message: "Failed to generate workflow management config" });
+    }
+  });
+
+  // Test and verification plan generation
+  app.post("/api/test-verification/plan", isAuthenticated, async (req, res) => {
+    try {
+      const { features, integrations } = req.body;
+      const result = await generateTestAndVerificationPlan({ features, integrations });
+      res.json(result);
+    } catch (error) {
+      console.error("Error generating test and verification plan:", error);
+      res.status(500).json({ message: "Failed to generate test and verification plan" });
     }
   });
 

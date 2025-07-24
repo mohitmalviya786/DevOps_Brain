@@ -1,6 +1,6 @@
 import { generateTerraformFromDiagram } from "./gemini";
 
-export async function generateTerraformCode(diagramData: any): Promise<{
+export async function generateTerraformCode(diagramData: any, cloudProvider: 'aws' | 'azure' | 'gcp'): Promise<{
   code: string;
   variables: Record<string, any>;
   outputs: Record<string, any>;
@@ -9,34 +9,91 @@ export async function generateTerraformCode(diagramData: any): Promise<{
   const edges = diagramData.edges || [];
 
   // Use AI to generate Terraform code
-  const aiResult = await generateTerraformFromDiagram(nodes, edges);
+  const aiResult = await generateTerraformFromDiagram(nodes, edges, cloudProvider);
 
   // Add standard variables and outputs if not present
-  const standardVariables = {
-    region: {
-      description: "AWS region",
-      type: "string",
-      default: "us-east-1"
-    },
-    environment: {
-      description: "Environment name",
-      type: "string",
-      default: "production"
-    },
-    project_name: {
-      description: "Project name for resource naming",
-      type: "string"
-    },
-    ...aiResult.variables
-  };
-
-  const standardOutputs = {
-    vpc_id: {
-      description: "VPC ID",
-      value: "${aws_vpc.main.id}"
-    },
-    ...aiResult.outputs
-  };
+  let standardVariables: Record<string, any> = {};
+  let standardOutputs: Record<string, any> = {};
+  switch (cloudProvider) {
+    case 'aws':
+      standardVariables = {
+        region: {
+          description: "AWS region",
+          type: "string",
+          default: "us-east-1"
+        },
+        environment: {
+          description: "Environment name",
+          type: "string",
+          default: "production"
+        },
+        project_name: {
+          description: "Project name for resource naming",
+          type: "string"
+        },
+        ...aiResult.variables
+      };
+      standardOutputs = {
+        vpc_id: {
+          description: "VPC ID",
+          value: "${aws_vpc.main.id}"
+        },
+        ...aiResult.outputs
+      };
+      break;
+    case 'azure':
+      standardVariables = {
+        location: {
+          description: "Azure region",
+          type: "string",
+          default: "eastus"
+        },
+        environment: {
+          description: "Environment name",
+          type: "string",
+          default: "production"
+        },
+        project_name: {
+          description: "Project name for resource naming",
+          type: "string"
+        },
+        ...aiResult.variables
+      };
+      standardOutputs = {
+        resource_group_id: {
+          description: "Resource Group ID",
+          value: "${azurerm_resource_group.main.id}"
+        },
+        ...aiResult.outputs
+      };
+      break;
+    case 'gcp':
+      standardVariables = {
+        region: {
+          description: "GCP region",
+          type: "string",
+          default: "us-central1"
+        },
+        environment: {
+          description: "Environment name",
+          type: "string",
+          default: "production"
+        },
+        project_name: {
+          description: "Project name for resource naming",
+          type: "string"
+        },
+        ...aiResult.variables
+      };
+      standardOutputs = {
+        network_id: {
+          description: "VPC Network ID",
+          value: "${google_compute_network.main.id}"
+        },
+        ...aiResult.outputs
+      };
+      break;
+  }
 
   return {
     code: aiResult.code,
