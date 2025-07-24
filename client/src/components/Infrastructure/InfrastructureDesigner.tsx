@@ -64,9 +64,9 @@ export default function InfrastructureDesigner({ projectId, diagramId }: Infrast
   }, [project]);
 
   useEffect(() => {
-    if (diagram) {
+    if (diagram && (diagram as any).diagramData) {
       setCurrentDiagram(diagram);
-      loadDiagram(diagram.diagramData);
+      loadDiagram((diagram as any).diagramData);
     } else {
       clearDiagram();
     }
@@ -88,6 +88,8 @@ export default function InfrastructureDesigner({ projectId, diagramId }: Infrast
       }
     },
     onSuccess: (response) => {
+      const savedDiagram = response.json ? response.json() : response;
+      setCurrentDiagram(savedDiagram);
       toast({
         title: "Success",
         description: "Infrastructure diagram saved successfully.",
@@ -117,7 +119,28 @@ export default function InfrastructureDesigner({ projectId, diagramId }: Infrast
   // Generate Terraform mutation
   const generateTerraformMutation = useMutation({
     mutationFn: async () => {
-      const response = await apiRequest("POST", `/api/diagrams/${diagramId}/terraform`);
+      // First, ensure we have a saved diagram
+      let targetDiagramId = diagramId || currentDiagram?.id;
+      
+      if (!targetDiagramId && storeDiagram && projectId) {
+        // Save the diagram first if it doesn't exist
+        const saveResponse = await apiRequest("POST", "/api/diagrams", {
+          projectId,
+          name: "Infrastructure Diagram",
+          description: "Auto-generated infrastructure diagram",
+          diagramData: storeDiagram,
+          version: 1,
+        });
+        const savedDiagram = await saveResponse.json();
+        targetDiagramId = savedDiagram.id;
+        setCurrentDiagram(savedDiagram);
+      }
+
+      if (!targetDiagramId) {
+        throw new Error("Please save your diagram first before generating Terraform code");
+      }
+
+      const response = await apiRequest("POST", `/api/diagrams/${targetDiagramId}/terraform`);
       return await response.json();
     },
     onSuccess: (config) => {
@@ -200,44 +223,23 @@ export default function InfrastructureDesigner({ projectId, diagramId }: Infrast
   }, [addNode]);
 
   const handleDiagramChange = useCallback((nodes: any[], edges: any[]) => {
-    const diagramData = { nodes, edges };
-    
-    // Auto-save after a delay
-    const timeoutId = setTimeout(() => {
-      if (projectId && (diagramId || nodes.length > 0)) {
-        saveDiagramMutation.mutate(diagramData);
-      }
-    }, 2000);
+    // Only update store, don't auto-save on every change
+    // User can save manually using the Save Draft button
+  }, []);
 
-    return () => clearTimeout(timeoutId);
-  }, [projectId, diagramId, saveDiagramMutation]);
-
-  const handleGenerateTerraform = useCallback(async () => {
-    if (!diagramId) {
+  const handleGenerateTerraform = useCallback(() => {
+    if (!storeDiagram || !storeDiagram.nodes || storeDiagram.nodes.length === 0) {
       toast({
-        title: "Error",
-        description: "Please save the diagram first before generating Terraform code.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    if (storeDiagram.nodes.length === 0) {
-      toast({
-        title: "Error",
-        description: "Please add some infrastructure components before generating code.",
+        title: "No Infrastructure",
+        description: "Please add some infrastructure components before generating Terraform code.",
         variant: "destructive",
       });
       return;
     }
 
     setGeneratingCode(true);
-    try {
-      await generateTerraformMutation.mutateAsync();
-    } finally {
-      setGeneratingCode(false);
-    }
-  }, [diagramId, storeDiagram.nodes.length, generateTerraformMutation, setGeneratingCode, toast]);
+    generateTerraformMutation.mutate();
+  }, [storeDiagram, generateTerraformMutation, setGeneratingCode, toast]);
 
   const handleValidateConfiguration = useCallback(() => {
     if (storeDiagram.nodes.length === 0) {
@@ -301,9 +303,9 @@ export default function InfrastructureDesigner({ projectId, diagramId }: Infrast
 
   return (
     <ReactFlowProvider>
-      <div className="flex h-screen bg-slate-50 dark:bg-background">
+      <div className="h-full bg-slate-50 dark:bg-background">
         {/* Main Content */}
-        <div className="flex-1 flex flex-col overflow-hidden">
+        <div className="h-full flex flex-col overflow-hidden">
           {/* Top Bar */}
           <header className="bg-white dark:bg-card border-b border-slate-200 dark:border-border px-6 py-4">
             <div className="flex items-center justify-between">
@@ -329,8 +331,8 @@ export default function InfrastructureDesigner({ projectId, diagramId }: Infrast
               <div className="flex items-center space-x-4">
                 <Button
                   variant="outline"
-                  onClick={() => saveDiagramMutation.mutate(storeDiagram)}
-                  disabled={saveDiagramMutation.isPending}
+                  onClick={() => saveDiagramMutation.mutate({ nodes: storeDiagram.nodes, edges: storeDiagram.edges })}
+                  disabled={saveDiagramMutation.isPending || storeDiagram.nodes.length === 0}
                 >
                   <i className="fas fa-save mr-2"></i>
                   {saveDiagramMutation.isPending ? 'Saving...' : 'Save Draft'}
@@ -358,24 +360,30 @@ export default function InfrastructureDesigner({ projectId, diagramId }: Infrast
 
           {/* Content Area */}
           <div className="flex-1 overflow-hidden">
-            <div className="h-full flex">
-              {/* Component Palette */}
-              <div className="absolute top-4 right-4 z-10">
+            <div className="h-full flex min-h-0">
+              {/* Component Palette - Left Side */}
+              <div className="w-80 border-r border-slate-200 dark:border-border bg-white dark:bg-card overflow-y-auto">
                 <ComponentPalette onComponentSelect={handleComponentSelect} />
               </div>
 
               {/* Diagram Canvas */}
-              <DiagramCanvas
-                onNodeSelect={(node) => {}}
-                onDiagramChange={handleDiagramChange}
-              />
+              <div className="flex-1 relative min-w-0 min-h-0">
+                <DiagramCanvas
+                  onNodeSelect={(node) => {
+                    // Node selection is handled in DiagramCanvas via store
+                  }}
+                  onDiagramChange={handleDiagramChange}
+                />
+              </div>
 
-              {/* Properties Panel */}
-              <PropertiesPanel
-                onGenerateTerraform={handleGenerateTerraform}
-                onValidateConfiguration={handleValidateConfiguration}
-                isGenerating={isGeneratingCode}
-              />
+              {/* Properties Panel - Right Side */}
+              <div className="w-80 border-l border-slate-200 dark:border-border">
+                <PropertiesPanel
+                  onGenerateTerraform={handleGenerateTerraform}
+                  onValidateConfiguration={handleValidateConfiguration}
+                  isGenerating={isGeneratingCode}
+                />
+              </div>
             </div>
           </div>
         </div>

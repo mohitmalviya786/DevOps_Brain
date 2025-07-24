@@ -43,6 +43,7 @@ function AWSResourceNode({ data }: { data: any }) {
   );
 }
 
+// Memoize nodeTypes to prevent unnecessary re-renders
 const nodeTypes = {
   awsResource: AWSResourceNode,
 };
@@ -83,10 +84,8 @@ export default function DiagramCanvas({ onNodeSelect, onDiagramChange }: Diagram
     setEdges(flowEdges);
   }, [currentDiagram, setNodes, setEdges]);
 
-  // Notify parent of changes
-  useEffect(() => {
-    onDiagramChange(nodes, edges);
-  }, [nodes, edges, onDiagramChange]);
+  // Don't auto-notify parent of changes to prevent excessive saving
+  // Parent can access the current state when needed
 
   const onConnect = useCallback(
     (params: Connection) => {
@@ -143,7 +142,6 @@ export default function DiagramCanvas({ onNodeSelect, onDiagramChange }: Diagram
         position,
         data: {
           label: resource.label,
-          resourceType,
           ...resource.defaultProps,
         },
       };
@@ -168,7 +166,7 @@ export default function DiagramCanvas({ onNodeSelect, onDiagramChange }: Diagram
   );
 
   return (
-    <div className="flex-1 bg-slate-50 relative" ref={reactFlowWrapper}>
+    <div className="w-full h-full bg-slate-50 relative" ref={reactFlowWrapper}>
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -182,6 +180,7 @@ export default function DiagramCanvas({ onNodeSelect, onDiagramChange }: Diagram
         nodeTypes={nodeTypes}
         fitView
         attributionPosition="bottom-left"
+        style={{ width: '100%', height: '100%' }}
       >
         <Background color="#aaa" gap={16} />
         <Controls />
@@ -221,7 +220,7 @@ export default function DiagramCanvas({ onNodeSelect, onDiagramChange }: Diagram
                 className="p-2 h-8 w-8"
                 title="Fit to Screen"
                 onClick={() => {
-                  const { fitView } = useReactFlow.getState();
+                  const { fitView } = useReactFlow();
                   fitView();
                 }}
               >

@@ -172,11 +172,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Diagram not found" });
       }
       // Fetch the project to get the cloudProvider
+      if (!diagram.projectId) {
+        return res.status(404).json({ message: "Project ID not found for diagram" });
+      }
       const project = await storage.getProject(diagram.projectId);
       if (!project) {
         return res.status(404).json({ message: "Project not found for diagram" });
       }
-      const cloudProvider = project.cloudProvider || 'aws';
+      const cloudProvider = (project.cloudProvider as 'aws' | 'azure' | 'gcp') || 'aws';
 
       const terraformCode = await generateTerraformCode(diagram.diagramData, cloudProvider);
       
@@ -220,11 +223,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Diagram not found" });
       }
       // Fetch the project to get the cloudProvider
+      if (!diagram.projectId) {
+        return res.status(404).json({ message: "Project ID not found for diagram" });
+      }
       const project = await storage.getProject(diagram.projectId);
       if (!project) {
         return res.status(404).json({ message: "Project not found for diagram" });
       }
-      const cloudProvider = project.cloudProvider || 'aws';
+      const cloudProvider = (project.cloudProvider as 'aws' | 'azure' | 'gcp') || 'aws';
 
       const costEstimation = await estimateCosts(diagram.diagramData, cloudProvider);
       
@@ -328,10 +334,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let cloudProvider: 'aws' | 'azure' | 'gcp' = 'aws';
       if (diagramId) {
         const diagram = await storage.getDiagram(diagramId);
-        if (diagram) {
+        if (diagram && diagram.projectId) {
           const project = await storage.getProject(diagram.projectId);
           if (project) {
-            cloudProvider = project.cloudProvider || 'aws';
+            cloudProvider = (project.cloudProvider as 'aws' | 'azure' | 'gcp') || 'aws';
           }
         }
       }
